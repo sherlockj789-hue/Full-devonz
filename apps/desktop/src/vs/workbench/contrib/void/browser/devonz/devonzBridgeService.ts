@@ -3,10 +3,10 @@
  *  Provides real-time WebSocket sync between the Devonz desktop editor and the Devonz web platform.
  *--------------------------------------------------------------------------------------------*/
 
-import { Disposable } from '~/vs/base/common/lifecycle';
-import { Emitter, Event } from '~/vs/base/common/event';
-import { ILogService } from '~/vs/platform/log/common/log';
-import { INotificationService, Severity } from '~/vs/platform/notification/common/notification';
+import { Disposable } from '../../../../../base/common/lifecycle.js';
+import { Emitter, Event } from '../../../../../base/common/event.js';
+import { ILogService } from '../../../../../platform/log/common/log.js';
+import { INotificationService, Severity } from '../../../../../platform/notification/common/notification.js';
 
 export const enum DevonzBridgeState {
 	Disconnected = 'disconnected',
@@ -36,15 +36,15 @@ export class DevonzBridgeService extends Disposable implements IDevonzBridgeServ
 	private _state = DevonzBridgeState.Disconnected;
 	private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	private _reconnectAttempts = 0;
-	private _maxReconnectAttempts = 10;
+	private readonly _maxReconnectAttempts = 10;
 	private _sessionId = '';
 	private _connectionParams: { apiUrl: string; projectId: string; token: string } | null = null;
 
 	private readonly _onStateChange = this._register(new Emitter<DevonzBridgeState>());
-	readonly onStateChange = this._onStateChange.event;
+	readonly onStateChange: Event<DevonzBridgeState> = this._onStateChange.event;
 
 	private readonly _onMessage = this._register(new Emitter<IDevonzBridgeMessage>());
-	readonly onMessage = this._onMessage.event;
+	readonly onMessage: Event<IDevonzBridgeMessage> = this._onMessage.event;
 
 	constructor(
 		@ILogService private readonly _logService: ILogService,
@@ -79,12 +79,12 @@ export class DevonzBridgeService extends Disposable implements IDevonzBridgeServ
 			this._logService.info('[DevonzBridge] Connected ✓');
 		};
 
-		this._ws.onmessage = (e) => {
+		this._ws.onmessage = (e: MessageEvent) => {
 			try {
 				const msg: IDevonzBridgeMessage = JSON.parse(e.data as string);
 				this._onMessage.fire(msg);
 			} catch {
-				// ignore malformed
+				// ignore malformed messages
 			}
 		};
 
