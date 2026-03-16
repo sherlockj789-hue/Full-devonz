@@ -16,26 +16,21 @@ permissions:
 
 env:
   NODE_VERSION: "20"
-  # Prevents OOM on large VS Code fork builds
   NODE_OPTIONS: "--max-old-space-size=6144"
 
 jobs:
   # ─────────────────────────────────────────────────────────────────
-  # LINUX — produces .deb + .AppImage (x64)
+  # LINUX — .deb + .AppImage (x64)
   # ─────────────────────────────────────────────────────────────────
   build-linux:
     name: Linux (x64) — .deb + .AppImage
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-        with:
-          path: repo
 
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: repo/apps/desktop/package-lock.json
 
       - name: Install system dependencies
         run: |
@@ -45,281 +40,298 @@ jobs:
             libkrb5-dev fakeroot rpm xvfb \
             pkg-config python3 python3-pip \
             libgtk-3-dev libnss3-dev libasound2-dev \
-            libxshmfence-dev libgbm-dev libgles2-mesa-dev
+            libxshmfence-dev libgbm-dev libgles2-mesa-dev \
+            snapcraft
 
-      - name: Install desktop dependencies
-        working-directory: repo/apps/desktop
+      - name: Install dependencies
+        working-directory: apps/desktop
         run: npm ci --legacy-peer-deps
 
+      - name: Build React components (required before compile)
+        working-directory: apps/desktop
+        run: npm run buildreact
+        env:
+          NODE_OPTIONS: "--max-old-space-size=6144"
+
       - name: Compile TypeScript
-        working-directory: repo/apps/desktop
+        working-directory: apps/desktop
         run: npm run compile
         env:
           NODE_OPTIONS: "--max-old-space-size=6144"
 
-      - name: Build — Linux x64
-        working-directory: repo/apps/desktop
-        run: |
-          npm run gulp vscode-linux-x64-min
+      - name: Build min package — Linux x64
+        working-directory: apps/desktop
+        run: npm run gulp -- vscode-linux-x64-min
         env:
           NODE_OPTIONS: "--max-old-space-size=6144"
 
       - name: Package .deb
-        working-directory: repo/apps/desktop
+        working-directory: apps/desktop
         run: |
-          npm run gulp vscode-linux-x64-prepare-deb
-          npm run gulp vscode-linux-x64-build-deb
+          npm run gulp -- vscode-linux-x64-prepare-deb || true
+          npm run gulp -- vscode-linux-x64-build-deb || true
         continue-on-error: true
 
       - name: Package .AppImage
-        working-directory: repo/apps/desktop
+        working-directory: apps/desktop
         run: |
-          npm run gulp vscode-linux-x64-prepare-appimage
-          npm run gulp vscode-linux-x64-build-appimage
+          npm run gulp -- vscode-linux-x64-prepare-appimage || true
+          npm run gulp -- vscode-linux-x64-build-appimage || true
         continue-on-error: true
 
       - name: Collect artifacts
         run: |
-          mkdir -p /tmp/artifacts
-          find repo/apps/desktop/.build -name "*.deb" -exec cp {} /tmp/artifacts/ \; 2>/dev/null || true
-          find repo/apps/desktop/.build -name "*.AppImage" -exec cp {} /tmp/artifacts/ \; 2>/dev/null || true
-          # Fallback: tar up the built folder
-          if [ -d "repo/apps/desktop/.build/linux" ]; then
-            cd repo/apps/desktop/.build/linux
-            tar -czf /tmp/artifacts/devonz-editor-linux-x64.tar.gz . 
+          mkdir -p dist-linux
+          find apps/desktop/.build -name "*.deb" -exec cp {} dist-linux/ \; 2>/dev/null || true
+          find apps/desktop/.build -name "*.AppImage" -exec cp {} dist-linux/ \; 2>/dev/null || true
+          # Always produce a tar.gz fallback
+          if [ -d "apps/desktop/.build/linux-x64" ]; then
+            tar -czf dist-linux/devonz-editor-linux-x64.tar.gz \
+              -C apps/desktop/.build/linux-x64 .
+          elif [ -d "apps/desktop/.build" ]; then
+            find apps/desktop/.build -maxdepth 2 -name "VSCode-linux*" -type d | head -1 | xargs -I{} tar -czf dist-linux/devonz-editor-linux-x64.tar.gz -C {} . 2>/dev/null || true
           fi
-          ls -lh /tmp/artifacts/
+          ls -lh dist-linux/ || echo "No artifacts found"
 
       - uses: actions/upload-artifact@v4
         with:
           name: linux-x64
-          path: /tmp/artifacts/
+          path: dist-linux/
           if-no-files-found: warn
 
   # ─────────────────────────────────────────────────────────────────
-  # WINDOWS — produces .exe (NSIS installer, x64)
+  # WINDOWS — .exe (x64)
   # ─────────────────────────────────────────────────────────────────
   build-windows:
     name: Windows (x64) — .exe installer
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
-        with:
-          path: repo
 
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: repo/apps/desktop/package-lock.json
 
-      - name: Install desktop dependencies
-        working-directory: repo/apps/desktop
+      - name: Install dependencies
+        working-directory: apps/desktop
         shell: cmd
         run: npm ci --legacy-peer-deps
 
+      - name: Build React components
+        working-directory: apps/desktop
+        shell: cmd
+        run: npm run buildreact
+        env:
+          NODE_OPTIONS: "--max-old-space-size=6144"
+
       - name: Compile TypeScript
-        working-directory: repo/apps/desktop
+        working-directory: apps/desktop
         shell: cmd
         run: npm run compile
         env:
           NODE_OPTIONS: "--max-old-space-size=6144"
 
-      - name: Build — Windows x64
-        working-directory: repo/apps/desktop
+      - name: Build min package — Windows x64
+        working-directory: apps/desktop
         shell: cmd
-        run: npm run gulp vscode-win32-x64-min
+        run: npm run gulp -- vscode-win32-x64-min
         env:
           NODE_OPTIONS: "--max-old-space-size=6144"
 
-      - name: Package — NSIS installer
-        working-directory: repo/apps/desktop
+      - name: Package — system setup .exe
+        working-directory: apps/desktop
         shell: cmd
-        run: npm run gulp vscode-win32-x64-inno-updater
+        run: npm run gulp -- vscode-win32-x64-system-setup
         continue-on-error: true
 
-      - name: Package — System setup .exe
-        working-directory: repo/apps/desktop
+      - name: Package — user setup .exe
+        working-directory: apps/desktop
         shell: cmd
-        run: npm run gulp vscode-win32-x64-system-setup
-        continue-on-error: true
-
-      - name: Package — User setup .exe
-        working-directory: repo/apps/desktop
-        shell: cmd
-        run: npm run gulp vscode-win32-x64-user-setup
+        run: npm run gulp -- vscode-win32-x64-user-setup
         continue-on-error: true
 
       - name: Collect artifacts
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path C:\artifacts
-          Get-ChildItem -Path repo\apps\desktop\.build -Recurse -Include "*.exe","*.msi" | Copy-Item -Destination C:\artifacts\ -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path dist-windows
+          Get-ChildItem -Path apps/desktop/.build -Recurse -Include "*.exe","*.msi" -ErrorAction SilentlyContinue | Copy-Item -Destination dist-windows/
           # Fallback zip
-          if (Test-Path "repo\apps\desktop\.build\win32-x64") {
-            Compress-Archive -Path "repo\apps\desktop\.build\win32-x64\*" -DestinationPath "C:\artifacts\devonz-editor-windows-x64.zip" -Force
+          $buildDir = Get-ChildItem "apps/desktop/.build" -Directory | Where-Object { $_.Name -like "*win32*" } | Select-Object -First 1
+          if ($buildDir) {
+            Compress-Archive -Path "$($buildDir.FullName)\*" -DestinationPath "dist-windows\devonz-editor-windows-x64.zip" -Force
           }
-          Get-ChildItem C:\artifacts\
+          Get-ChildItem dist-windows/
 
       - uses: actions/upload-artifact@v4
         with:
           name: windows-x64
-          path: C:\artifacts\
+          path: dist-windows/
           if-no-files-found: warn
 
   # ─────────────────────────────────────────────────────────────────
-  # macOS INTEL — produces .dmg (x64 / darwin)
+  # macOS INTEL — .dmg (x64)
   # ─────────────────────────────────────────────────────────────────
   build-macos-intel:
     name: macOS Intel (x64) — .dmg
-    runs-on: macos-13        # macos-13 = Intel x64
+    runs-on: macos-13
     steps:
       - uses: actions/checkout@v4
-        with:
-          path: repo
 
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: repo/apps/desktop/package-lock.json
 
-      - name: Install desktop dependencies
-        working-directory: repo/apps/desktop
+      - name: Install dependencies
+        working-directory: apps/desktop
         run: npm ci --legacy-peer-deps
 
+      - name: Build React components
+        working-directory: apps/desktop
+        run: npm run buildreact
+        env:
+          NODE_OPTIONS: "--max-old-space-size=6144"
+
       - name: Compile TypeScript
-        working-directory: repo/apps/desktop
+        working-directory: apps/desktop
         run: npm run compile
         env:
           NODE_OPTIONS: "--max-old-space-size=6144"
 
-      - name: Build — macOS x64
-        working-directory: repo/apps/desktop
-        run: npm run gulp vscode-darwin-x64-min
+      - name: Build min package — macOS x64
+        working-directory: apps/desktop
+        run: npm run gulp -- vscode-darwin-x64-min
         env:
           NODE_OPTIONS: "--max-old-space-size=6144"
 
-      - name: Package — .dmg (Intel)
-        working-directory: repo/apps/desktop
+      - name: Create .dmg — Intel
+        working-directory: apps/desktop
         run: |
-          npm run gulp vscode-darwin-x64
-          # create-dmg is more reliable than hdiutil for CI
           brew install create-dmg || true
-          APP=$(find .build -name "Devonz Editor.app" -maxdepth 5 | head -1)
+          APP=$(find .build -name "*.app" -maxdepth 5 | head -1)
+          echo "Found app: $APP"
           if [ -n "$APP" ]; then
+            mkdir -p dist-macos-intel
             create-dmg \
               --volname "Devonz Editor" \
-              --volicon "devonz_icons/devonz-128.png" \
               --window-pos 200 120 \
               --window-size 800 400 \
               --icon-size 100 \
-              --icon "Devonz Editor.app" 200 190 \
-              --hide-extension "Devonz Editor.app" \
               --app-drop-link 600 185 \
-              ".build/devonz-editor-darwin-x64.dmg" \
-              "$(dirname "$APP")/"
+              "dist-macos-intel/devonz-editor-darwin-x64.dmg" \
+              "$(dirname "$APP")/" \
+            || hdiutil create -volname "Devonz Editor" \
+              -srcfolder "$(dirname "$APP")" \
+              -ov -format UDZO \
+              "dist-macos-intel/devonz-editor-darwin-x64.dmg"
           fi
         continue-on-error: true
 
-      - name: Fallback — tar if no .dmg
+      - name: Fallback tar if no .dmg
         run: |
-          mkdir -p /tmp/artifacts
-          find repo/apps/desktop/.build -name "*.dmg" -exec cp {} /tmp/artifacts/ \; 2>/dev/null || true
-          if [ -z "$(ls /tmp/artifacts/*.dmg 2>/dev/null)" ]; then
-            APP=$(find repo/apps/desktop/.build -name "*.app" -maxdepth 5 | head -1)
+          mkdir -p dist-macos-intel
+          if [ -z "$(ls dist-macos-intel/*.dmg 2>/dev/null)" ]; then
+            APP=$(find apps/desktop/.build -name "*.app" -maxdepth 6 | head -1)
             if [ -n "$APP" ]; then
-              tar -czf /tmp/artifacts/devonz-editor-darwin-x64.tar.gz -C "$(dirname "$APP")" "$(basename "$APP")"
+              tar -czf dist-macos-intel/devonz-editor-darwin-x64.tar.gz \
+                -C "$(dirname "$APP")" "$(basename "$APP")"
+            else
+              find apps/desktop/.build -maxdepth 3 -type d | head -5
             fi
           fi
-          ls -lh /tmp/artifacts/
+          ls -lh dist-macos-intel/ || echo "No artifacts"
 
       - uses: actions/upload-artifact@v4
         with:
           name: macos-intel-x64
-          path: /tmp/artifacts/
+          path: dist-macos-intel/
           if-no-files-found: warn
 
   # ─────────────────────────────────────────────────────────────────
-  # macOS ARM64 — produces .dmg (Apple Silicon / M1/M2/M3/M4)
+  # macOS APPLE SILICON — .dmg (arm64)
   # ─────────────────────────────────────────────────────────────────
   build-macos-arm64:
     name: macOS Apple Silicon (arm64) — .dmg
-    runs-on: macos-14        # macos-14 = Apple Silicon M1 runner (free)
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-        with:
-          path: repo
 
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: repo/apps/desktop/package-lock.json
 
-      - name: Install desktop dependencies
-        working-directory: repo/apps/desktop
+      - name: Install dependencies
+        working-directory: apps/desktop
         run: npm ci --legacy-peer-deps
 
+      - name: Build React components
+        working-directory: apps/desktop
+        run: npm run buildreact
+        env:
+          NODE_OPTIONS: "--max-old-space-size=6144"
+
       - name: Compile TypeScript
-        working-directory: repo/apps/desktop
+        working-directory: apps/desktop
         run: npm run compile
         env:
           NODE_OPTIONS: "--max-old-space-size=6144"
 
-      - name: Build — macOS arm64
-        working-directory: repo/apps/desktop
-        run: npm run gulp vscode-darwin-arm64-min
+      - name: Build min package — macOS arm64
+        working-directory: apps/desktop
+        run: npm run gulp -- vscode-darwin-arm64-min
         env:
           NODE_OPTIONS: "--max-old-space-size=6144"
 
-      - name: Package — .dmg (Apple Silicon)
-        working-directory: repo/apps/desktop
+      - name: Create .dmg — Apple Silicon
+        working-directory: apps/desktop
         run: |
-          npm run gulp vscode-darwin-arm64
           brew install create-dmg || true
-          APP=$(find .build -name "Devonz Editor.app" -maxdepth 5 | head -1)
+          APP=$(find .build -name "*.app" -maxdepth 5 | head -1)
+          echo "Found app: $APP"
           if [ -n "$APP" ]; then
+            mkdir -p dist-macos-arm64
             create-dmg \
               --volname "Devonz Editor" \
-              --volicon "devonz_icons/devonz-128.png" \
               --window-pos 200 120 \
               --window-size 800 400 \
               --icon-size 100 \
-              --icon "Devonz Editor.app" 200 190 \
-              --hide-extension "Devonz Editor.app" \
               --app-drop-link 600 185 \
-              ".build/devonz-editor-darwin-arm64.dmg" \
-              "$(dirname "$APP")/"
+              "dist-macos-arm64/devonz-editor-darwin-arm64.dmg" \
+              "$(dirname "$APP")/" \
+            || hdiutil create -volname "Devonz Editor" \
+              -srcfolder "$(dirname "$APP")" \
+              -ov -format UDZO \
+              "dist-macos-arm64/devonz-editor-darwin-arm64.dmg"
           fi
         continue-on-error: true
 
-      - name: Fallback — tar if no .dmg
+      - name: Fallback tar if no .dmg
         run: |
-          mkdir -p /tmp/artifacts
-          find repo/apps/desktop/.build -name "*.dmg" -exec cp {} /tmp/artifacts/ \; 2>/dev/null || true
-          if [ -z "$(ls /tmp/artifacts/*.dmg 2>/dev/null)" ]; then
-            APP=$(find repo/apps/desktop/.build -name "*.app" -maxdepth 5 | head -1)
+          mkdir -p dist-macos-arm64
+          if [ -z "$(ls dist-macos-arm64/*.dmg 2>/dev/null)" ]; then
+            APP=$(find apps/desktop/.build -name "*.app" -maxdepth 6 | head -1)
             if [ -n "$APP" ]; then
-              tar -czf /tmp/artifacts/devonz-editor-darwin-arm64.tar.gz -C "$(dirname "$APP")" "$(basename "$APP")"
+              tar -czf dist-macos-arm64/devonz-editor-darwin-arm64.tar.gz \
+                -C "$(dirname "$APP")" "$(basename "$APP")"
+            else
+              find apps/desktop/.build -maxdepth 3 -type d | head -5
             fi
           fi
-          ls -lh /tmp/artifacts/
+          ls -lh dist-macos-arm64/ || echo "No artifacts"
 
       - uses: actions/upload-artifact@v4
         with:
           name: macos-arm64
-          path: /tmp/artifacts/
+          path: dist-macos-arm64/
           if-no-files-found: warn
 
   # ─────────────────────────────────────────────────────────────────
-  # RELEASE — collects all 4 artifacts and creates a GitHub Release
+  # RELEASE — publish all 4 artifacts
   # ─────────────────────────────────────────────────────────────────
   release:
     name: Create GitHub Release
     needs: [build-linux, build-windows, build-macos-intel, build-macos-arm64]
     runs-on: ubuntu-latest
-    if: always()   # run even if some builds failed (partial release is fine)
+    if: always()
     steps:
       - uses: actions/checkout@v4
 
@@ -333,61 +345,50 @@ jobs:
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "tag=desktop/v$VERSION" >> $GITHUB_OUTPUT
+          echo "Building release for version: $VERSION"
 
       - uses: actions/download-artifact@v4
         with:
-          path: artifacts/
+          path: release-artifacts/
           merge-multiple: true
 
-      - name: List artifacts
-        run: find artifacts/ -type f | sort
-
-      - name: Rename artifacts with version
+      - name: List & rename artifacts
         run: |
-          cd artifacts
+          find release-artifacts/ -type f | sort
+          cd release-artifacts
           VERSION="${{ steps.version.outputs.version }}"
           for f in *; do
-            # Only rename if file doesn't already have version in name
-            if [[ "$f" != *"$VERSION"* ]]; then
-              BASE="${f%.*}"
-              EXT="${f##*.}"
-              mv "$f" "${BASE}-v${VERSION}.${EXT}" 2>/dev/null || true
-            fi
+            [[ "$f" == *"$VERSION"* ]] && continue
+            BASE="${f%.*}"; EXT="${f##*.}"
+            [[ "$BASE" == "$EXT" ]] && mv "$f" "${f}-v${VERSION}" 2>/dev/null || mv "$f" "${BASE}-v${VERSION}.${EXT}" 2>/dev/null || true
           done
           ls -lh
 
-      - name: Generate release notes
-        id: notes
+      - name: Write release notes
         run: |
-          cat > /tmp/release-notes.md << NOTES
-          ## Devonz Editor v${{ steps.version.outputs.version }}
+          VERSION="${{ steps.version.outputs.version }}"
+          cat > release-notes.md << NOTES
+          ## Devonz Editor v${VERSION}
 
-          AI-powered code editor built on VS Code. Download for your platform:
+          AI-powered code editor — full VS Code base with Devonz AI built in.
 
-          | Platform | File | Notes |
+          | Platform | Download | Notes |
           |---|---|---|
-          | 🐧 Linux | \`devonz-editor-linux-x64.*\` | `.deb` for Debian/Ubuntu, `.AppImage` runs anywhere |
-          | 🪟 Windows | \`devonz-editor-windows-x64.*\` | NSIS installer — run and follow prompts |
-          | 🍎 macOS Intel | \`devonz-editor-darwin-x64.dmg\` | For Macs with Intel CPUs (pre-2020) |
-          | 🍎 macOS Apple Silicon | \`devonz-editor-darwin-arm64.dmg\` | For M1, M2, M3, M4 Macs |
+          | 🐧 Linux | \`.deb\` or \`.AppImage\` or \`.tar.gz\` | AppImage runs anywhere without install |
+          | 🪟 Windows | \`.exe\` or \`.zip\` | Run the installer and follow prompts |
+          | 🍎 macOS Intel | \`darwin-x64.dmg\` | For Macs with Intel CPU (pre-2020) |
+          | 🍎 macOS Apple Silicon | \`darwin-arm64.dmg\` | For M1 / M2 / M3 / M4 Macs |
 
-          ### macOS note
-          First launch: right-click the app → Open (to bypass Gatekeeper on unsigned builds).
-
-          ### What's inside
-          - Full VS Code-based editor with Devonz AI built in
-          - Real-time sync with the Devonz web platform via \`@devonz/bridge\`
-          - Multi-provider AI: OpenAI, Anthropic, Gemini, Ollama
+          > **macOS first launch:** Right-click → Open to bypass Gatekeeper on unsigned builds.
           NOTES
 
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: "Devonz Editor v${{ steps.version.outputs.version }}"
-          body_path: /tmp/release-notes.md
-          files: artifacts/**/*
+          body_path: release-notes.md
+          files: release-artifacts/**/*
           draft: false
           prerelease: false
-          generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
