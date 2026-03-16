@@ -1,4 +1,4 @@
-name: Release Desktop Editor
+name: Release Desktop Editor for Devonz
 
 on:
   push:
