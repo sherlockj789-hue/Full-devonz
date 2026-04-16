@@ -1,0 +1,14 @@
+# Settings for the Devonz/Full-devonz stack
+[build]
+  command = "npm run build"  # Or "pnpm run build" if using pnpm as recommended in the repo
+  publish = "dist"           # Vite typically builds into the /dist folder
+
+# Critical for React Router/Remix: redirects all paths to index.html 
+# so the frontend can handle the routing without 404 errors.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[build.environment]
+  NODE_VERSION = "20"        # Ensures compatibility with modern React 19/Vite 5 features
